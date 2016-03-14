@@ -351,6 +351,23 @@ public class PhotoModule
 
     private int mJpegFileSizeEstimation = 0;
     private int mRemainingPhotos = -1;
+    private static final int SELFIE_FLASH_DURATION = 680;
+
+    private class SelfieThread extends Thread {
+        public void run() {
+            try {
+                Thread.sleep(SELFIE_FLASH_DURATION);
+                mActivity.runOnUiThread(new Runnable() {
+                    public void run() {
+                        mFocusManager.doSnap();
+                    }
+                });
+            } catch(InterruptedException e) {
+            }
+            selfieThread = null;
+        }
+    }
+    private SelfieThread selfieThread;
 
     private MediaSaveService.OnMediaSavedListener mOnMediaSavedListener =
             new MediaSaveService.OnMediaSavedListener() {
@@ -379,6 +396,11 @@ public class PhotoModule
                 }
             }, 100);
         }
+    }
+
+    public Parameters getParameters()
+    {
+        return mParameters;
     }
 
     /**
@@ -1152,6 +1174,7 @@ public class PhotoModule
         public void onPictureTaken(final byte [] jpegData, CameraProxy camera) {
             Log.d(TAG, "JpegPictureCallback: onPictureTaken()");
             if (mCameraState != LONGSHOT) {
+                mUI.stopSelfieFlash();
                 mUI.enableShutter(true);
             }
             if (mPaused) {
@@ -1232,9 +1255,9 @@ public class PhotoModule
                     mCameraDevice.cancelAutoFocus();
                 }
             } else if (((mCameraState != LONGSHOT) && (mReceivedSnapNum == mBurstSnapNum))
-                        || isLongshotDone()){
+                        || isLongshotDone()) {
                 mUI.enableShutter(true);
-                mFocusManager.resetTouchFocus();
+                mFocusManager.restartTouchFocusTimer();
                 if (CameraUtil.FOCUS_MODE_CONTINUOUS_PICTURE.equals(mFocusManager.getFocusMode(false))
                         || CameraUtil.FOCUS_MODE_MW_CONTINUOUS_PICTURE.equals(mFocusManager.getFocusMode(false))) {
                     mCameraDevice.cancelAutoFocus();
@@ -1608,9 +1631,16 @@ public class PhotoModule
                     new JpegPictureCallback(loc));
             setCameraState(SNAPSHOT_IN_PROGRESS);
 
-            // LGE G4: Preview needs to be restarted when flash got used while luminance is low
-            if (CameraUtil.isLowLuminance(mParameters)) {
-                setupPreview();
+            // LGE G4: Preview needs to be restarted when flash got used
+            if (CameraUtil.isSupported(mParameters, CameraSettings.KEY_LUMINANCE_CONITION)) {
+                String flashMode = mPreferences.getString(
+                                    CameraSettings.KEY_FLASH_MODE,
+                                    mActivity.getString(R.string.pref_camera_flashmode_default));
+                if (flashMode.equals(Parameters.FLASH_MODE_ON) || 
+                        (!flashMode.equals(Parameters.FLASH_MODE_OFF) &&
+                        CameraUtil.isLowLuminance(mParameters))) {
+                    setupPreview();
+                }
             }
         }
 
@@ -1859,6 +1889,9 @@ public class PhotoModule
             }
             mUI.overrideSettings(CameraSettings.KEY_FLASH_MODE, flashMode);
         }
+
+        if(mCameraId != CameraHolder.instance().getFrontCameraId())
+            CameraSettings.removePreferenceFromScreen(mPreferenceGroup, CameraSettings.KEY_SELFIE_FLASH);
     }
 
     private void overrideCameraSettings(final String flashMode,
@@ -2083,7 +2116,8 @@ public class PhotoModule
 
     @Override
     public synchronized void onShutterButtonClick() {
-        if (mPaused || mShutterPressing
+        if ((mCameraDevice == null)
+                || mPaused || mShutterPressing
                 || mUI.collapseCameraControls()
                 || (mCameraState == SWITCHING_CAMERA)
                 || (mCameraState == PREVIEW_STOPPED)
@@ -2146,8 +2180,25 @@ public class PhotoModule
                     mActivity.getString(R.string.pref_camera_zsl_default));
             mUI.overrideSettings(CameraSettings.KEY_ZSL, zsl);
             mUI.startCountDown(seconds, playSound);
+
         } else {
             mSnapshotOnIdle = false;
+            initiateSnap();
+        }
+    }
+
+    private void initiateSnap()
+    {
+        if(mPreferences.getString(CameraSettings.KEY_SELFIE_FLASH,
+                mActivity.getString(R.string.pref_selfie_flash_default))
+                .equalsIgnoreCase("on") &&
+                mCameraId == CameraHolder.instance().getFrontCameraId()) {
+            mUI.startSelfieFlash();
+            if(selfieThread == null) {
+                selfieThread = new SelfieThread();
+                selfieThread.start();
+            }
+        } else {
             mFocusManager.doSnap();
         }
         mShutterPressing = false;
@@ -2317,6 +2368,11 @@ public class PhotoModule
         if (msensor != null) {
             mSensorManager.unregisterListener(this, msensor);
         }
+
+        if(selfieThread != null) {
+            selfieThread.interrupt();
+        }
+        mUI.stopSelfieFlash();
 
         Log.d(TAG, "remove idle handleer in onPause");
         removeIdleHandler();
@@ -3708,7 +3764,14 @@ public class PhotoModule
             final int maxFocusPos = mParameters.getInt(CameraSettings.KEY_MAX_FOCUS_SCALE);
             //update mparameters to fetch latest focus position
             mParameters = mCameraDevice.getParameters();
-            final int CurFocusPos = mParameters.getInt(CameraSettings.KEY_MANUAL_FOCUS_SCALE);
+            int CurFocusPos = minFocusPos;
+
+            try {
+                 CurFocusPos = mParameters.getInt(CameraSettings.KEY_MANUAL_FOCUS_SCALE);
+            } catch (NumberFormatException e) {
+                 // Do nothing
+            }
+
             focusbar.setProgress(CurFocusPos);
             focusPositionText.setText("Current focus position is " + CurFocusPos);
 
@@ -3760,7 +3823,8 @@ public class PhotoModule
             //update mparameters to fetch latest focus position
             mParameters = mCameraDevice.getParameters();
             final String CurFocusPos = mParameters.get(CameraSettings.KEY_MANUAL_FOCUS_DIOPTER);
-            focusPositionText.setText("Current focus position is " + CurFocusPos);
+            focusPositionText.setText("Current focus position is " +
+                    (CurFocusPos != null ? CurFocusPos : minFocusStr));
             linear.addView(input);
             linear.addView(focusPositionText);
             alert.setView(linear);
@@ -4295,7 +4359,7 @@ public class PhotoModule
     @Override
     public void onCountDownFinished() {
         mSnapshotOnIdle = false;
-        mFocusManager.doSnap();
+        initiateSnap();
         mFocusManager.onShutterUp();
         mUI.overrideSettings(CameraSettings.KEY_ZSL, null);
         mUI.showUIAfterCountDown();

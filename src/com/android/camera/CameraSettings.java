@@ -140,6 +140,7 @@ public class CameraSettings {
     private static final String KEY_QC_SUPPORTED_TNR_MODES = "tnr-mode-values";
     private static final String KEY_QC_SUPPORTED_VIDEO_TNR_MODES = "video-tnr-mode-values";
     private static final String KEY_QC_SUPPORTED_PREVIEW_FORMATS = "preview-format-values";
+    private static final String KEY_QC_SUPPORTED_FACE_DETECTION = "face-detection-values";
     private static final String KEY_SNAPCAM_SUPPORTED_HDR_MODES = "hdr-mode-values";
     private static final String KEY_SNAPCAM_SUPPORTED_HDR_NEED_1X = "hdr-need-1x-values";
     public static final String KEY_SNAPCAM_SHUTTER_SPEED = "shutter-speed";
@@ -237,6 +238,8 @@ public class CameraSettings {
     public static final String KEY_QC_SUPPORTED_MANUAL_FOCUS_MODES = "manual-focus-modes";
     public static final String KEY_QC_SUPPORTED_MANUAL_EXPOSURE_MODES = "manual-exposure-modes";
     public static final String KEY_QC_SUPPORTED_MANUAL_WB_MODES = "manual-wb-modes";
+
+    public static final String KEY_SELFIE_FLASH = "pref_selfie_flash_key";
 
     public static final String EXPOSURE_DEFAULT_VALUE = "0";
     public static final String VALUE_ON = "on";
@@ -444,6 +447,14 @@ public class CameraSettings {
 
     public static List<String> getSupportedFaceRecognitionModes(Parameters params) {
         String str = params.get(KEY_QC_SUPPORTED_FACE_RECOGNITION_MODES);
+        if (str == null) {
+            return null;
+        }
+        return split(str);
+    }
+
+    public static List<String> getSupportedFaceDetection(Parameters params) {
+        String str = params.get(KEY_QC_SUPPORTED_FACE_DETECTION);
         if (str == null) {
             return null;
         }
@@ -788,17 +799,26 @@ public class CameraSettings {
                     faceRC, getSupportedFaceRecognitionModes(mParameters));
         }
 
+        if (faceDetection != null) {
+            filterUnsupportedOptions(group,
+                    faceDetection, getSupportedFaceDetection(mParameters));
+        }
+
         if (autoExposure != null) {
             filterUnsupportedOptions(group,
                     autoExposure, mParameters.getSupportedAutoexposure());
         }
 
         if (videoSnapSize != null) {
-            filterUnsupportedOptions(group, videoSnapSize, sizeListToStringList(
-                    mParameters.getSupportedPictureSizes()));
+            if (CameraUtil.isVideoSnapshotSupported(mParameters)) {
+                filterUnsupportedOptions(group, videoSnapSize, sizeListToStringList(
+                        mParameters.getSupportedPictureSizes()));
+            } else {
+                removePreference(group, videoSnapSize.getKey());
+            }
         }
 
-        if (histogram!= null) {
+        if (histogram != null) {
             filterUnsupportedOptions(group,
                     histogram, mParameters.getSupportedHistogramModes());
         }
@@ -808,12 +828,17 @@ public class CameraSettings {
                     pictureFormat, getSupportedPictureFormatLists());
         }
 
-        if(advancedFeatures != null) {
+        if (advancedFeatures != null) {
             filterUnsupportedOptions(group,
                     advancedFeatures, getSupportedAdvancedFeatures(mParameters));
         }
-        if (longShot!= null && !isLongshotSupported(mParameters)) {
+
+        if (longShot != null && !isLongshotSupported(mParameters)) {
             removePreference(group, longShot.getKey());
+        }
+
+        if (auto_hdr != null && !CameraUtil.isAutoHDRSupported(mParameters)) {
+            removePreference(group, auto_hdr.getKey());
         }
 
         if (videoRotation != null) {
@@ -868,9 +893,9 @@ public class CameraSettings {
                     getSupportedSeeMoreModes(mParameters));
         }
 
-        if ((videoHfrMode != null) &&
-            (mParameters.getSupportedHfrSizes() == null)) {
-                filterUnsupportedOptions(group, videoHfrMode, null);
+        if (videoHfrMode != null) {
+            filterUnsupportedOptions(group, videoHfrMode, getSupportedHighFrameRateModes(
+                    mParameters));
         }
 
         if (videoQuality != null) {
@@ -1239,6 +1264,28 @@ public class CameraSettings {
         // initial picture size is that of the back camera.
         initialCameraPictureSize(context, parameters);
         writePreferredCameraId(preferences, currentCameraId);
+    }
+
+    public static List<String> getSupportedHighFrameRateModes(Parameters params) {
+        ArrayList<String> supported = new ArrayList<String>();
+        List<String> supportedModes = params.getSupportedVideoHighFrameRateModes();
+        String hsr = params.get(KEY_VIDEO_HSR);
+
+        if (supportedModes == null) {
+            return null;
+        }
+
+        for (String highFrameRateMode : supportedModes) {
+            if (highFrameRateMode.equals("off")) {
+                supported.add(highFrameRateMode);
+            } else {
+                supported.add("hfr" + highFrameRateMode);
+                if (hsr != null) {
+                    supported.add("hsr" + highFrameRateMode);
+                }
+            }
+        }
+        return supported;
     }
 
     public static ArrayList<String> getSupportedVideoQualities(int cameraId,
