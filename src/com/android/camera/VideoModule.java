@@ -552,27 +552,15 @@ public class VideoModule implements CameraModule,
 
     @Override
     public void setFocusParameters() {
-        updateCameraParametersFocus();
-        mCameraDevice.setParameters(mParameters);
-    }
-
-    private void updateCameraParametersFocus() {
+        if (mFocusAreaSupported)
+            mParameters.setFocusAreas(mFocusManager.getFocusAreas());
+        if (mMeteringAreaSupported)
+            mParameters.setMeteringAreas(mFocusManager.getMeteringAreas());
         setAutoExposureLockIfSupported();
         setAutoWhiteBalanceLockIfSupported();
-        setFocusAreasIfSupported();
-        setMeteringAreasIfSupported();
-        mParameters.setFocusMode(mFocusManager.getFocusMode(true));
-    }
-
-    private void setFocusAreasIfSupported() {
-        if (mFocusAreaSupported) {
-            mParameters.setFocusAreas(mFocusManager.getFocusAreas());
-        }
-    }
-
-    private void setMeteringAreasIfSupported() {
-        if (mMeteringAreaSupported) {
-            mParameters.setMeteringAreas(mFocusManager.getMeteringAreas());
+        if (mFocusAreaSupported || mMeteringAreaSupported) {
+            mParameters.setFocusMode(mFocusManager.getFocusMode(true));
+            mCameraDevice.setParameters(mParameters);
         }
     }
 
@@ -858,8 +846,10 @@ public class VideoModule implements CameraModule,
         @Override
         public void onAutoFocus(
                 boolean focused, CameraProxy camera) {
+            Log.v(TAG, "AutoFocusCallback, mPaused=" + mPaused);
             if (mPaused) return;
 
+            //setCameraState(IDLE);
             mCameraDevice.refreshParameters();
             mFocusManager.setParameters(mCameraDevice.getParameters());
             mFocusManager.onAutoFocus(focused, false);
@@ -2563,10 +2553,6 @@ public class VideoModule implements CameraModule,
             mParameters.setPreviewFrameRate(mProfile.videoFrameRate);
         }
 
-        // Set focus mode
-        mFocusManager.overrideFocusMode(null);
-        updateCameraParametersFocus();
-
         forceFlashOffIfSupported(!mPreviewFocused);
         videoWidth = mProfile.videoFrameWidth;
         videoHeight = mProfile.videoFrameHeight;
@@ -2605,6 +2591,9 @@ public class VideoModule implements CameraModule,
             mZoomValue = p.getZoom();
             mParameters.setZoom(mZoomValue);
         }
+
+        // Set focus mode
+        mParameters.setFocusMode(mFocusManager.getFocusMode(true));
 
         mParameters.set(CameraUtil.RECORDING_HINT, CameraUtil.TRUE);
 
