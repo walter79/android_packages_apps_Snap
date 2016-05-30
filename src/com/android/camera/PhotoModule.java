@@ -2288,6 +2288,11 @@ public class PhotoModule
     @Override
     public void onResumeBeforeSuper() {
         mPaused = false;
+        mPreferences = new ComboPreferences(mActivity);
+        CameraSettings.upgradeGlobalPreferences(mPreferences.getGlobal(), mActivity);
+        mCameraId = getPreferredCameraId(mPreferences);
+        mPreferences.setLocalId(mActivity, mCameraId);
+        CameraSettings.upgradeLocalPreferences(mPreferences.getLocal());
     }
 
     private void openCamera() {
@@ -2334,6 +2339,7 @@ public class PhotoModule
             Log.v(TAG, "On resume.");
             onResumeTasks();
         }
+        mUI.setSwitcherIndex();
         mHandler.post(new Runnable(){
             @Override
             public void run(){
@@ -3021,6 +3027,7 @@ public class PhotoModule
         if (CameraUtil.isSupported(colorEffect, mParameters.getSupportedColorEffects())) {
             mParameters.setColorEffect(colorEffect);
         }
+
         //Set Saturation
         String saturationStr = getSaturationSafe();
         if (saturationStr != null) {
@@ -3562,6 +3569,11 @@ public class PhotoModule
                 }
                 if (mLgeHdrMode) {
                     mParameters.set(CameraSettings.KEY_SNAPCAM_HDR_MODE, CameraSettings.LGE_HDR_MODE_ON);
+                    // Force enable ZSL mode for LG HDR
+                    try {
+                        mUI.setPreference(CameraSettings.KEY_ZSL, Parameters.ZSL_ON);
+                    } catch (NullPointerException e) {
+                    }
                 }
             } else {
                 if (mLgeHdrMode) {
